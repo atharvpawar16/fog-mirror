@@ -4,6 +4,12 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>Fog Mirror</title>
+<meta name="theme-color" content="#101010">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='22' fill='%23101010'/><rect x='18' y='14' width='64' height='72' rx='8' fill='%23cbd5e1'/><path d='M30 55 Q50 35 70 55' stroke='%23101010' stroke-width='5' fill='none' stroke-linecap='round'/></svg>">
+<link rel="manifest" href='data:application/manifest+json,{"name":"Fog Mirror","short_name":"FogMirror","display":"standalone","background_color":"%23101010","theme_color":"%23101010","start_url":"."}'>
 <script src="https://cdn.tailwindcss.com"></script>
 <script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
@@ -23,6 +29,7 @@
     object-fit: cover; transform: scaleX(-1);
   }
   #fog { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+  #mirror-vignette { position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 0 120px rgba(0,0,0,.55); }
   #finger-dot {
     position: absolute; width: 22px; height: 22px; border-radius: 999px;
     border: 2px solid rgba(255,255,255,.85); background: rgba(255,255,255,.15);
@@ -48,6 +55,7 @@
 <div id="stage">
   <div id="frame">
     <video id="cam" autoplay playsinline muted></video>
+    <div id="mirror-vignette"></div>
     <canvas id="fog"></canvas>
     <div id="finger-dot"></div>
   </div>
@@ -131,6 +139,19 @@
       c.fillStyle = rg;
       c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
     }
+    // fine grain noise (two octaves)
+    for (let o = 0; o < 2; o++) {
+      const n = o === 0 ? 2600 : 5200, base = o === 0 ? 1.4 : 0.7;
+      for (let i = 0; i < n; i++) {
+        const x = Math.random() * w, y = Math.random() * h;
+        const r = 0.3 + Math.random() * base;
+        const dark = Math.random() < 0.5;
+        c.fillStyle = dark
+          ? 'rgba(100,116,139,' + ((0.03 + Math.random() * 0.06) * a) + ')'
+          : 'rgba(255,255,255,' + ((0.05 + Math.random() * 0.12) * a) + ')';
+        c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+      }
+    }
     // droplets
     for (let i = 0; i < 800; i++) {
       const x = Math.random() * w, y = Math.random() * h;
@@ -161,7 +182,37 @@
     ctx.drawImage(fogTex, 0, 0);
   }
 
+  const drips = [];
+  function maybeDrip(x, y) {
+    if (drips.length > 14 || Math.random() > 0.04) return;
+    drips.push({ x: x + (Math.random() - 0.5) * 20, y, v: 0, w: (1.5 + Math.random() * 2.5) * dpr, life: 1 });
+  }
+  function dripLoop() {
+    for (let i = drips.length - 1; i >= 0; i--) {
+      const d = drips[i];
+      d.v += 0.12 * dpr;            // gravity
+      d.y += d.v;
+      d.life -= 0.008;
+      if (d.life <= 0 || d.y > canvas.height) { drips.splice(i, 1); continue; }
+      ctx.globalCompositeOperation = 'destination-out';
+      // streak above the drop
+      const g = ctx.createLinearGradient(0, d.y - d.v * 14, 0, d.y);
+      g.addColorStop(0, 'rgba(0,0,0,0)');
+      g.addColorStop(1, 'rgba(0,0,0,' + 0.10 * d.life + ')');
+      ctx.fillStyle = g;
+      ctx.fillRect(d.x - d.w, d.y - d.v * 14, d.w * 2, d.v * 14);
+      // the drop itself
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(0,0,0,' + 0.55 * d.life + ')';
+      ctx.arc(d.x, d.y, d.w * 1.6, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    requestAnimationFrame(dripLoop);
+  }
+  requestAnimationFrame(dripLoop);
+
   function wipe(x, y, strength) {
+    maybeDrip(x, y);
     const r = parseInt(brushSlider.value, 10) * dpr;
     ctx.globalCompositeOperation = 'destination-out';
     const g = ctx.createRadialGradient(x, y, 0, x, y, r);
@@ -242,8 +293,12 @@
       wipe(from.x + dx * d / dist, from.y + dy * d / dist, 0.85);
     }
   }
+  let lastTap = 0;
   canvas.addEventListener('pointerdown', e => {
     initAudio();
+    const now = performance.now();
+    if (now - lastTap < 320) { fogUp(); lastTap = 0; return; }
+    lastTap = now;
     if (handMode && handSeen) return;
     drawing = true; last = pos(e); wipe(last.x, last.y, 0.85);
     canvas.setPointerCapture(e.pointerId);
@@ -270,7 +325,10 @@
       setStatus('camera ready - wipe the fog');
       initHands();
     } catch (err) {
-      setStatus('camera blocked - allow webcam and reload');
+      setStatus('camera blocked - tap here to retry');
+      statusEl.style.pointerEvents = 'auto';
+      statusEl.style.cursor = 'pointer';
+      statusEl.onclick = () => location.reload();
       camDot.className = 'dot off';
     }
   }
