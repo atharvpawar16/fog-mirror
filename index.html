@@ -378,31 +378,78 @@
     }
     try {
       const hands = new Hands({ locateFile: f => 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/' + f });
-      hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
-      let smoothTip = null, targetTip = null;
+      hands.setOptions({ maxNumHands: 1, modelComplexity: 1, minDetectionConfidence: 0.65, minTrackingConfidence: 0.6 });
+      // One Euro Filter: smooth when slow, responsive when fast - kills jitter
+      class EuroFilter {
+        constructor(minCutoff, beta) { this.minCutoff = minCutoff; this.beta = beta; this.xPrev = null; this.dxPrev = 0; this.tPrev = null; }
+        filter(x, t) {
+          if (this.tPrev === null) { this.tPrev = t; this.xPrev = x; return x; }
+          const dt = Math.max(1e-3, (t - this.tPrev) / 1000);
+          const dx = (x - this.xPrev) / dt;
+          const alpha = cutoff => { const tau = 1 / (2 * Math.PI * cutoff); return 1 / (1 + tau / dt); };
+          const dxHat = alpha(1.0) * dx + (1 - alpha(1.0)) * this.dxPrev;
+          const cutoff = this.minCutoff + this.beta * Math.abs(dxHat);
+          const xHat = alpha(cutoff) * x + (1 - alpha(cutoff)) * this.xPrev;
+          this.xPrev = xHat; this.dxPrev = dxHat; this.tPrev = t;
+          return xHat;
+        }
+      }
+      const fx = new EuroFilter(1.2, 0.05), fy = new EuroFilter(1.2, 0.05);
+      let targetTip = null, handScale = 0, wipeGesture = false;
+
+      function dist2d(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+      function isPointing(lm) {
+        // index extended, middle+ring+pinky curled
+        const wrist = lm[0];
+        const ext = (tip, pip) => dist2d(lm[tip], wrist) > dist2d(lm[pip], wrist) * 1.12;
+        const indexOut = ext(8, 6);
+        const middleIn = !ext(12, 10), ringIn = !ext(16, 14), pinkyIn = !ext(20, 18);
+        return indexOut && middleIn && ringIn && pinkyIn;
+      }
+
       hands.onResults(res => {
         const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
-        if (!lm) { targetTip = null; if (!smoothTip) fingerDot.style.display = 'none'; handSeen = false; handDot.className = 'dot off'; handStatus.textContent = handMode ? 'show your hand' : 'hands off'; return; }
+        if (!lm) {
+          targetTip = null; handSeen = false; wipeGesture = false;
+          fingerDot.style.display = 'none';
+          handDot.className = 'dot off';
+          handStatus.textContent = handMode ? 'show your hand' : 'hands off';
+          fx.xPrev = null; fy.xPrev = null; fx.tPrev = null; fy.tPrev = null;
+          return;
+        }
         handSeen = true;
-        if (handMode) { handDot.className = 'dot on'; handStatus.textContent = 'tracking'; }
+        // hand size on screen (wrist to middle knuckle) -> dynamic brush scale
+        handScale = dist2d(lm[0], lm[9]);
+        wipeGesture = isPointing(lm);
+        if (handMode) {
+          handDot.className = 'dot on';
+          handStatus.textContent = wipeGesture ? 'wiping' : 'point to wipe';
+        }
         const tip = lm[8];
-        targetTip = { x: (1 - tip.x) * canvas.width, y: tip.y * canvas.height };
+        const t = performance.now();
+        targetTip = {
+          x: fx.filter((1 - tip.x) * canvas.width, t),
+          y: fy.filter(tip.y * canvas.height, t)
+        };
       });
-      // lerp loop: wipe follows smoothed finger position
+
       function handLoop() {
-        if (targetTip) {
-          if (!smoothTip) smoothTip = { ...targetTip };
-          const nx = smoothTip.x + (targetTip.x - smoothTip.x) * 0.35;
-          const ny = smoothTip.y + (targetTip.y - smoothTip.y) * 0.35;
-          if (handMode) {
-            stroke(smoothTip, { x: nx, y: ny });
-            fingerDot.style.display = 'block';
-            fingerDot.style.left = (nx / dpr) + 'px';
-            fingerDot.style.top = (ny / dpr) + 'px';
+        if (targetTip && handMode) {
+          fingerDot.style.display = 'block';
+          fingerDot.style.left = (targetTip.x / dpr) + 'px';
+          fingerDot.style.top = (targetTip.y / dpr) + 'px';
+          fingerDot.style.opacity = wipeGesture ? 1 : 0.45;
+          if (wipeGesture) {
+            // dynamic brush: slider base scaled by hand size on screen
+            const base = parseInt(brushSlider.value, 10) * dpr;
+            const dyn = Math.max(base * 0.6, Math.min(base * 1.8, handScale * canvas.width * 0.35));
+            brushSlider.dataset.handOverride = 1;
+            const prev = brushSlider.value;
+            brushSlider.value = Math.round(dyn / dpr);
+            wipe(targetTip.x, targetTip.y, 0.8);
+            brushSlider.value = prev;
           }
-          smoothTip = { x: nx, y: ny };
         } else {
-          smoothTip = null;
           fingerDot.style.display = 'none';
         }
         requestAnimationFrame(handLoop);
