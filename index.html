@@ -1,0 +1,395 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Fog Mirror</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js"></script>
+<style>
+  html, body { height: 100%; overflow: hidden; background: #101010; }
+  #stage { position: fixed; inset: 0; }
+  /* classic mirror frame */
+  #frame {
+    position: absolute; inset: 14px;
+    border: 10px solid #2a2a2a; border-radius: 10px;
+    box-shadow: 0 0 0 1px #3a3a3a, inset 0 0 40px rgba(0,0,0,.45), 0 18px 50px rgba(0,0,0,.55);
+    overflow: hidden; background: #000;
+  }
+  #cam {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; transform: scaleX(-1);
+  }
+  #fog { position: absolute; inset: 0; width: 100%; height: 100%; touch-action: none; cursor: crosshair; }
+  #finger-dot {
+    position: absolute; width: 22px; height: 22px; border-radius: 999px;
+    border: 2px solid rgba(255,255,255,.85); background: rgba(255,255,255,.15);
+    transform: translate(-50%, -50%); pointer-events: none; display: none; z-index: 20;
+  }
+  .ctl-btn {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 12px; border-radius: 8px; font-size: 13px; font-weight: 500;
+    background: #232323; color: #d4d4d4; border: 1px solid #333; cursor: pointer;
+    transition: background .15s, color .15s;
+  }
+  .ctl-btn:hover { background: #2e2e2e; }
+  .ctl-btn.active { background: #e5e5e5; color: #111; border-color: #e5e5e5; }
+  .ctl-btn svg { width: 15px; height: 15px; }
+  input[type=range] { accent-color: #d4d4d4; }
+  .dot { width: 7px; height: 7px; border-radius: 999px; display: inline-block; }
+  .dot.on { background: #86c98a; }
+  .dot.off { background: #555; }
+</style>
+</head>
+<body class="text-slate-200 select-none">
+
+<div id="stage">
+  <div id="frame">
+    <video id="cam" autoplay playsinline muted></video>
+    <canvas id="fog"></canvas>
+    <div id="finger-dot"></div>
+  </div>
+</div>
+
+<!-- header -->
+<div class="fixed top-0 inset-x-0 z-30 flex flex-col items-center pt-7 pointer-events-none">
+  <h1 style="font-family: Georgia, 'Times New Roman', serif; font-weight: 400; letter-spacing: .22em; color: #e5e5e5;" class="text-xl sm:text-2xl uppercase">Fog Mirror</h1>
+  <div class="mt-2 flex items-center gap-2 text-[10px] sm:text-[11px] tracking-widest uppercase" style="color:#777">
+    <span id="cam-dot" class="dot off"></span><span id="status">starting camera</span>
+    <span class="opacity-40">|</span>
+    <span id="hand-dot" class="dot off"></span><span id="hand-status">hands off</span>
+  </div>
+</div>
+
+<!-- toolbar -->
+<div class="fixed bottom-4 inset-x-0 z-30 flex justify-center px-2">
+  <div style="background:rgba(20,20,20,.92);border:1px solid #333;border-radius:12px;backdrop-filter:blur(10px)" class="px-3 py-2.5 flex items-center gap-2 sm:gap-3 flex-wrap justify-center max-w-[calc(100vw-16px)]">
+    <button id="mode-btn" class="ctl-btn"><i data-lucide="hand"></i><span>hands</span></button>
+    <div class="flex items-center gap-1.5 text-xs text-slate-400">
+      <i data-lucide="brush" class="w-3.5 h-3.5"></i>
+      <input id="brush" type="range" min="18" max="120" value="52" class="w-16 sm:w-20">
+    </div>
+    <div class="flex items-center gap-1.5 text-xs text-slate-400">
+      <i data-lucide="cloud-fog" class="w-3.5 h-3.5"></i>
+      <input id="density" type="range" min="40" max="100" value="96" class="w-16 sm:w-20" title="fog density">
+    </div>
+    <button id="refog-btn" class="ctl-btn active"><i data-lucide="refresh-ccw"></i><span>re-fog</span></button>
+    <button id="hiss-btn" class="ctl-btn"><i data-lucide="wind"></i><span>hiss</span></button>
+    <button id="snap-btn" class="ctl-btn"><i data-lucide="camera"></i><span>snapshot</span></button>
+    <button id="fs-btn" class="ctl-btn"><i data-lucide="maximize"></i></button>
+    <button id="reset-btn" class="ctl-btn"><i data-lucide="sparkles"></i><span>steam up</span></button>
+  </div>
+</div>
+
+<script>
+(function () {
+  'use strict';
+  const video = document.getElementById('cam');
+  const canvas = document.getElementById('fog');
+  const ctx = canvas.getContext('2d');
+  const statusEl = document.getElementById('status');
+  const camDot = document.getElementById('cam-dot');
+  const handDot = document.getElementById('hand-dot');
+  const handStatus = document.getElementById('hand-status');
+  const brushSlider = document.getElementById('brush');
+  const densitySlider = document.getElementById('density');
+  const refogBtn = document.getElementById('refog-btn');
+  const hissBtn = document.getElementById('hiss-btn');
+  const modeBtn = document.getElementById('mode-btn');
+  const fingerDot = document.getElementById('finger-dot');
+
+  let dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+  let fogTex = null;
+  let refogOn = true;
+  let handMode = false;
+  let handSeen = false;
+
+  const setStatus = t => { statusEl.textContent = t; };
+
+  // ---------- procedural fog texture ----------
+  function makeFogTexture(w, h, density) {
+    const off = document.createElement('canvas');
+    off.width = w; off.height = h;
+    const c = off.getContext('2d');
+    const a = density / 100;
+    const g = c.createLinearGradient(0, 0, w, h);
+    g.addColorStop(0, 'rgba(226,232,240,' + a + ')');
+    g.addColorStop(.5, 'rgba(203,213,225,' + a + ')');
+    g.addColorStop(1, 'rgba(226,232,240,' + a + ')');
+    c.fillStyle = g;
+    c.fillRect(0, 0, w, h);
+    // condensation blotches
+    for (let i = 0; i < 240; i++) {
+      const x = Math.random() * w, y = Math.random() * h;
+      const r = 20 + Math.random() * 100;
+      const rg = c.createRadialGradient(x, y, 0, x, y, r);
+      const ba = (0.05 + Math.random() * 0.09) * a;
+      rg.addColorStop(0, 'rgba(148,163,184,' + ba + ')');
+      rg.addColorStop(1, 'rgba(148,163,184,0)');
+      c.fillStyle = rg;
+      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    }
+    // droplets
+    for (let i = 0; i < 800; i++) {
+      const x = Math.random() * w, y = Math.random() * h;
+      const r = 0.5 + Math.random() * 2.1;
+      c.fillStyle = 'rgba(255,255,255,' + ((0.12 + Math.random() * 0.32) * a) + ')';
+      c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+    }
+    // soft blur pass for frosted look
+    if ('filter' in c) {
+      const blurred = document.createElement('canvas');
+      blurred.width = w; blurred.height = h;
+      const bc = blurred.getContext('2d');
+      bc.filter = 'blur(2px)';
+      bc.drawImage(off, 0, 0);
+      c.clearRect(0, 0, w, h);
+      c.drawImage(blurred, 0, 0);
+    }
+    return off;
+  }
+
+  function fogUp() {
+    const w = window.innerWidth, h = window.innerHeight;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    fogTex = makeFogTexture(canvas.width, canvas.height, parseInt(densitySlider.value, 10));
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(fogTex, 0, 0);
+  }
+
+  function wipe(x, y, strength) {
+    const r = parseInt(brushSlider.value, 10) * dpr;
+    ctx.globalCompositeOperation = 'destination-out';
+    const g = ctx.createRadialGradient(x, y, 0, x, y, r);
+    g.addColorStop(0, 'rgba(0,0,0,' + strength + ')');
+    g.addColorStop(0.65, 'rgba(0,0,0,' + strength * 0.45 + ')');
+    g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill();
+  }
+
+  // ---------- fog regeneration ----------
+  let lastFade = 0;
+  function fadeLoop(t) {
+    if (refogOn && fogTex && t - lastFade > 120) {
+      lastFade = t;
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.globalAlpha = 0.010;
+      ctx.drawImage(fogTex, 0, 0);
+      ctx.globalAlpha = 1;
+    }
+    requestAnimationFrame(fadeLoop);
+  }
+  requestAnimationFrame(fadeLoop);
+
+  // ---------- web audio: squeak + hiss ----------
+  let audioCtx = null, squeakGain = null, squeakFilter = null, hissGain = null, hissOn = false;
+  function initAudio() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      // shared noise buffer
+      const len = audioCtx.sampleRate * 2;
+      const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+      const data = buf.getChannelData(0);
+      for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
+      // squeak: bandpassed noise, gain driven by wipe speed
+      const squeakSrc = audioCtx.createBufferSource();
+      squeakSrc.buffer = buf; squeakSrc.loop = true;
+      squeakFilter = audioCtx.createBiquadFilter();
+      squeakFilter.type = 'bandpass'; squeakFilter.frequency.value = 1200; squeakFilter.Q.value = 8;
+      squeakGain = audioCtx.createGain(); squeakGain.gain.value = 0;
+      squeakSrc.connect(squeakFilter).connect(squeakGain).connect(audioCtx.destination);
+      squeakSrc.start();
+      // hiss: lowpassed noise, toggleable
+      const hissSrc = audioCtx.createBufferSource();
+      hissSrc.buffer = buf; hissSrc.loop = true;
+      const hissFilter = audioCtx.createBiquadFilter();
+      hissFilter.type = 'lowpass'; hissFilter.frequency.value = 900;
+      hissGain = audioCtx.createGain(); hissGain.gain.value = 0;
+      hissSrc.connect(hissFilter).connect(hissGain).connect(audioCtx.destination);
+      hissSrc.start();
+    } catch (e) { /* audio unsupported - silent */ }
+  }
+  let squeakLevel = 0;
+  function squeak(speed) {
+    if (!audioCtx || !squeakGain) return;
+    const target = Math.min(0.06, speed * 0.0012);
+    squeakLevel += (target - squeakLevel) * 0.3;
+    squeakGain.gain.setTargetAtTime(squeakLevel, audioCtx.currentTime, 0.03);
+    squeakFilter.frequency.setTargetAtTime(700 + Math.min(1800, speed * 14), audioCtx.currentTime, 0.05);
+  }
+  function squeakDecay() {
+    if (audioCtx && squeakGain) squeakGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.12);
+  }
+
+  // ---------- input: mouse / touch ----------
+  let drawing = false, last = null;
+  function pos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return { x: (e.clientX - rect.left) * dpr, y: (e.clientY - rect.top) * dpr };
+  }
+  function stroke(from, to) {
+    const dx = to.x - from.x, dy = to.y - from.y;
+    const dist = Math.hypot(dx, dy);
+    squeak(dist / dpr);
+    const step = Math.max(4 * dpr, (parseInt(brushSlider.value, 10) * dpr) / 4);
+    if (dist > 0) for (let d = 0; d <= dist; d += step) {
+      wipe(from.x + dx * d / dist, from.y + dy * d / dist, 0.85);
+    }
+  }
+  canvas.addEventListener('pointerdown', e => {
+    initAudio();
+    if (handMode && handSeen) return;
+    drawing = true; last = pos(e); wipe(last.x, last.y, 0.85);
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (!drawing) return;
+    const p = pos(e);
+    stroke(last, p);
+    last = p;
+  });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach(ev =>
+    canvas.addEventListener(ev, () => { drawing = false; squeakDecay(); }));
+
+  // ---------- webcam ----------
+  async function startCamera() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false
+      });
+      video.srcObject = stream;
+      await video.play();
+      camDot.className = 'dot on';
+      setStatus('camera ready - wipe the fog');
+      initHands();
+    } catch (err) {
+      setStatus('camera blocked - allow webcam and reload');
+      camDot.className = 'dot off';
+    }
+  }
+
+  // ---------- hand tracking with lerp smoothing ----------
+  function initHands() {
+    if (typeof Hands === 'undefined' || typeof Camera === 'undefined') {
+      handStatus.textContent = 'hands unavailable';
+      return;
+    }
+    try {
+      const hands = new Hands({ locateFile: f => 'https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/' + f });
+      hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+      let smoothTip = null, targetTip = null;
+      hands.onResults(res => {
+        const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+        if (!lm) { targetTip = null; if (!smoothTip) fingerDot.style.display = 'none'; handSeen = false; handDot.className = 'dot off'; handStatus.textContent = handMode ? 'show your hand' : 'hands off'; return; }
+        handSeen = true;
+        if (handMode) { handDot.className = 'dot on'; handStatus.textContent = 'tracking'; }
+        const tip = lm[8];
+        targetTip = { x: (1 - tip.x) * canvas.width, y: tip.y * canvas.height };
+      });
+      // lerp loop: wipe follows smoothed finger position
+      function handLoop() {
+        if (targetTip) {
+          if (!smoothTip) smoothTip = { ...targetTip };
+          const nx = smoothTip.x + (targetTip.x - smoothTip.x) * 0.35;
+          const ny = smoothTip.y + (targetTip.y - smoothTip.y) * 0.35;
+          if (handMode) {
+            stroke(smoothTip, { x: nx, y: ny });
+            fingerDot.style.display = 'block';
+            fingerDot.style.left = (nx / dpr) + 'px';
+            fingerDot.style.top = (ny / dpr) + 'px';
+          }
+          smoothTip = { x: nx, y: ny };
+        } else {
+          smoothTip = null;
+          fingerDot.style.display = 'none';
+        }
+        requestAnimationFrame(handLoop);
+      }
+      requestAnimationFrame(handLoop);
+      const camFeed = new Camera(video, {
+        onFrame: async () => { await hands.send({ image: video }); },
+        width: 640, height: 480
+      });
+      camFeed.start();
+    } catch (e) {
+      handStatus.textContent = 'hands unavailable';
+    }
+  }
+
+  // ---------- controls ----------
+  modeBtn.addEventListener('click', () => {
+    initAudio();
+    handMode = !handMode;
+    modeBtn.classList.toggle('active', handMode);
+    modeBtn.querySelector('span').textContent = handMode ? 'hands on' : 'hands';
+    handStatus.textContent = handMode ? (handSeen ? 'tracking' : 'show your hand') : 'hands off';
+    handDot.className = 'dot ' + (handMode && handSeen ? 'on' : 'off');
+    setStatus(handMode ? 'move your finger in front of the camera' : 'camera ready - wipe the fog');
+  });
+  refogBtn.addEventListener('click', () => {
+    refogOn = !refogOn;
+    refogBtn.classList.toggle('active', refogOn);
+  });
+  hissBtn.addEventListener('click', () => {
+    initAudio();
+    hissOn = !hissOn;
+    hissBtn.classList.toggle('active', hissOn);
+    if (hissGain && audioCtx) hissGain.gain.setTargetAtTime(hissOn ? 0.05 : 0, audioCtx.currentTime, 0.2);
+  });
+  densitySlider.addEventListener('change', fogUp);
+  document.getElementById('reset-btn').addEventListener('click', fogUp);
+  document.getElementById('fs-btn').addEventListener('click', () => {
+    if (document.fullscreenElement) document.exitFullscreen();
+    else document.documentElement.requestFullscreen().catch(() => {});
+  });
+
+  // ---------- snapshot: polaroid PNG ----------
+  document.getElementById('snap-btn').addEventListener('click', () => {
+    if (!video.videoWidth) { setStatus('camera not ready yet'); return; }
+    const pad = 28, capH = 74;
+    const vw = canvas.width, vh = canvas.height;
+    const out = document.createElement('canvas');
+    out.width = vw + pad * 2; out.height = vh + pad * 2 + capH;
+    const c = out.getContext('2d');
+    c.fillStyle = '#f8fafc';
+    c.fillRect(0, 0, out.width, out.height);
+    // mirrored video frame
+    c.save();
+    c.translate(pad + vw, pad);
+    c.scale(-1, 1);
+    c.drawImage(video, 0, 0, vw, vh);
+    c.restore();
+    // remaining fog on top
+    c.drawImage(canvas, pad, pad);
+    // caption
+    c.fillStyle = '#475569';
+    c.font = '600 ' + Math.round(16 * dpr) + 'px "Segoe UI", system-ui, sans-serif';
+    c.textAlign = 'center';
+    c.fillText('Fog Mirror', out.width / 2, pad + vh + capH / 2 + 6 * dpr);
+    const a = document.createElement('a');
+    a.download = 'fog-mirror.png';
+    a.href = out.toDataURL('image/png');
+    a.click();
+    setStatus('snapshot saved');
+  });
+
+  let resizeTimer;
+  window.addEventListener('resize', () => {
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => { dpr = Math.max(1, Math.min(2, window.devicePixelRatio || 1)); fogUp(); }, 250);
+  });
+
+  if (window.lucide) lucide.createIcons();
+  fogUp();
+  startCamera();
+})();
+</script>
+</body>
+</html>
