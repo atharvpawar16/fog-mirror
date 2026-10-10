@@ -152,12 +152,49 @@
         c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
       }
     }
-    // droplets
-    for (let i = 0; i < 800; i++) {
-      const x = Math.random() * w, y = Math.random() * h;
-      const r = 0.5 + Math.random() * 2.1;
-      c.fillStyle = 'rgba(255,255,255,' + ((0.12 + Math.random() * 0.32) * a) + ')';
+    // realistic droplets: body + rim shadow + specular highlight
+    function droplet(x, y, r) {
+      // body
+      let g = c.createRadialGradient(x, y, r * 0.15, x, y, r);
+      g.addColorStop(0, 'rgba(255,255,255,' + 0.10 * a + ')');
+      g.addColorStop(0.75, 'rgba(255,255,255,' + 0.16 * a + ')');
+      g.addColorStop(0.92, 'rgba(100,116,139,' + 0.28 * a + ')');
+      g.addColorStop(1, 'rgba(100,116,139,0)');
+      c.fillStyle = g;
       c.beginPath(); c.arc(x, y, r, 0, Math.PI * 2); c.fill();
+      // lower shadow crescent
+      g = c.createRadialGradient(x + r * 0.25, y + r * 0.35, 0, x + r * 0.25, y + r * 0.35, r * 0.7);
+      g.addColorStop(0, 'rgba(71,85,105,' + 0.18 * a + ')');
+      g.addColorStop(1, 'rgba(71,85,105,0)');
+      c.fillStyle = g;
+      c.beginPath(); c.arc(x, y, r * 0.85, 0, Math.PI * 2); c.fill();
+      // specular highlight (top-left)
+      g = c.createRadialGradient(x - r * 0.32, y - r * 0.38, 0, x - r * 0.32, y - r * 0.38, r * 0.42);
+      g.addColorStop(0, 'rgba(255,255,255,' + 0.75 * a + ')');
+      g.addColorStop(0.6, 'rgba(255,255,255,' + 0.25 * a + ')');
+      g.addColorStop(1, 'rgba(255,255,255,0)');
+      c.fillStyle = g;
+      c.beginPath(); c.arc(x - r * 0.32, y - r * 0.38, r * 0.42, 0, Math.PI * 2); c.fill();
+    }
+    // size distribution: mostly micro, few large; denser near edges
+    function edgeBias(v, max) {
+      // push some droplets toward frame edges like real condensation
+      if (Math.random() < 0.3) {
+        const t = Math.random();
+        return t < 0.5 ? Math.random() * max * 0.08 : max - Math.random() * max * 0.08;
+      }
+      return Math.random() * max;
+    }
+    for (let i = 0; i < 2400; i++) droplet(edgeBias(Math.random(), w), edgeBias(Math.random(), h), 0.6 + Math.random() * 1.4);
+    for (let i = 0; i < 500; i++) droplet(edgeBias(Math.random(), w), edgeBias(Math.random(), h), 2 + Math.random() * 3);
+    for (let i = 0; i < 70; i++) droplet(edgeBias(Math.random(), w), edgeBias(Math.random(), h), 5 + Math.random() * 7);
+    // a few old drip trails: vertical dotted streaks
+    for (let i = 0; i < 22; i++) {
+      const x = Math.random() * w, y0 = Math.random() * h * 0.4;
+      const len = 40 + Math.random() * (h * 0.35);
+      for (let d = 0; d < len; d += 3 + Math.random() * 6) {
+        droplet(x + (Math.random() - 0.5) * 3, y0 + d, 1 + Math.random() * 1.8);
+      }
     }
     // soft blur pass for frosted look
     if ('filter' in c) {
