@@ -1,88 +1,66 @@
-<div align="center">
+# Fog Mirror
 
-# 🌫️ Fog Mirror
+A steamy bathroom mirror in your browser. Your webcam is the glass, the fog covers it, and you wipe it clear with the mouse, your finger, or just your hand in the air.
 
-**A steamy bathroom mirror in your browser.**
+**Live:** https://fog-mirror-atharv.netlify.app
 
-Wipe the fog with your mouse, your finger, or just your hand in the air.
+![Wiping the fog](docs/demo.gif)
 
-[![Live Demo](https://img.shields.io/badge/LIVE%20DEMO-fog--mirror--atharv.netlify.app-101010?style=for-the-badge&logo=netlify&logoColor=white)](https://fog-mirror-atharv.netlify.app)
-[![Single File](https://img.shields.io/badge/single%20file-index.html-success?style=for-the-badge)](https://github.com/atharvpawar16/fog-mirror/blob/main/index.html)
-[![No Build](https://img.shields.io/badge/build%20step-none-blue?style=for-the-badge)](https://github.com/atharvpawar16/fog-mirror)
+## Why I built it
 
-<img src="docs/demo.gif" alt="Wiping the fog" width="720">
+I wanted to see how real a fogged mirror could feel with nothing but a browser: no app, no build, no install. Then I added hand tracking so you do not have to touch anything.
 
-</div>
+## What it does
 
----
+- Shows your camera mirrored, like a real mirror.
+- Covers it with fog made of thousands of procedural droplets with highlights and shadowed edges.
+- Tracks your hands: point to wipe a thin line, open your palm for a big wipe, use two hands at once.
+- Hold a fist for about a second to steam the mirror up again.
+- Drips run down the glass from wiped areas, and the fog slowly creeps back if you leave it on.
+- Makes its own sound (a squeak that follows your wipe speed, and a steam hiss) with the Web Audio API. There are no audio files.
+- Saves a polaroid-style PNG snapshot.
+- Installs to the home screen on a phone, with fullscreen mode and double-tap to steam up.
 
-## ✨ Features
+## Hand gestures
 
-| | |
+| Gesture | Result |
 |---|---|
-| 🪞 | **Real-time webcam mirror** - your camera, mirrored like a real mirror |
-| 💧 | **Photoreal condensation** - 3000+ procedural droplets with specular highlights, rim shadows and edge build-up |
-| 🖐️ | **AI hand tracking** - point to wipe precisely, open palm for a big wipe, two hands supported |
-| ✊ | **Fist = steam up** - hold a fist for a second and the mirror re-fogs |
-| 🩸 | **Water drip physics** - wiped areas shed drips that run down the glass |
-| 🌫️ | **Slow re-steaming** - fog gradually creeps back, or stays cleared - your choice |
-| 🔊 | **Synthesized sound** - wipe squeak (pitch follows speed) + optional steam hiss, pure Web Audio, zero audio files |
-| 📸 | **Snapshot** - download a polaroid-style PNG of the mirror |
-| 📱 | **PWA installable** - Add to Home Screen, fullscreen mode, double-tap to steam |
+| Index finger out | Precise wipe |
+| Open palm | Big wipe |
+| Fist, hold 1 second | Steam up again |
+| Two hands | Both wipe |
 
-## 🖐️ Hand gestures
+Hand positions are smoothed with a One Euro filter and nudged with velocity prediction, so the brush follows without jitter or lag. Brush size scales with how close your hand is.
 
-| Gesture | Action |
-|---------|--------|
-| ☝️ Point (index out) | Precise wipe |
-| 🖐️ Open palm | Big wipe (2.2x brush) |
-| ✊ Fist (hold 1s) | Steam up again |
-| 🖐️🖐️ Two hands | Both wipe at once |
+## Controls
 
-Tracking uses One Euro filtering (zero jitter), velocity prediction (zero lag) and distance-scaled brush size.
-
-## 🛠️ Tech
-
-Single self-contained `index.html` - **no build step, no backend, no dependencies to install.**
-
-| Piece | Library |
-|-------|---------|
-| Styling | Tailwind CSS (CDN) |
-| Icons | Lucide |
-| Hand tracking | MediaPipe Hands (CDN) |
-| Fog engine | HTML5 Canvas - procedural textures, `destination-out` compositing |
-| Audio | Web Audio API - synthesized noise |
-
-## 🚀 Run it
-
-Open `index.html` in any modern browser. That's it.
-
-> Camera + hand tracking need HTTPS or `localhost`.
-
-## ☁️ Deploy
-
-Any static host. On Netlify: drag the folder into the dashboard. Done.
-
-## 🎮 Controls
-
-| Control | What it does |
-|---------|--------------|
-| hands | toggle AI hand tracking / mouse mode |
+| Control | Does |
+|---|---|
+| hands | switch between hand tracking and mouse mode |
 | brush | wipe radius |
 | fog | fog density |
-| re-fog | fog slowly returns: on/off |
-| hiss | steam sound: on/off |
-| snapshot | download polaroid PNG |
-| fullscreen | immersive mode |
+| re-fog | fog slowly returns, on or off |
+| hiss | steam sound, on or off |
+| snapshot | download a PNG |
+| fullscreen | immersive view |
 | steam up | reset the fog |
-| double-tap | quick steam up |
 
-<div align="center">
+## How it is built
+
+The whole app is one `index.html`. No backend, no build step. It loads Tailwind (CDN) for styling, Lucide for icons and MediaPipe Hands for tracking. The fog is drawn on an HTML canvas and wiped with `destination-out` compositing.
+
+## Run it
+
+Open `index.html` in a modern browser. The camera and hand tracking need HTTPS or `localhost`. For `localhost`:
+
+```bash
+python3 -m http.server 8000
+```
+
+To deploy, put the folder on any static host. I use Netlify.
+
+## Screenshots
 
 ![Full fog](docs/full-fog.png)
 
-![Mobile](docs/mobile.png)
-
-**Made with 🌫️ and a webcam**
-
-</div>
+![On a phone](docs/mobile.png)
