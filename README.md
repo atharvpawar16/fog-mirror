@@ -1,5 +1,7 @@
 # Fog Mirror
 
+[![views](https://hits.sh/github.com/atharvpawar16/fog-mirror.svg?label=views)](https://hits.sh/github.com/atharvpawar16/fog-mirror/)
+
 A steamy bathroom mirror in your browser. Your webcam is the glass, the fog covers it, and you wipe it clear with the mouse, your finger, or just your hand in the air.
 
 **Live:** https://fog-mirror-atharv.netlify.app
