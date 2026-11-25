@@ -1,0 +1,33 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static-checks:
+    name: Static checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check inline JavaScript syntax
+        run: node .github/scripts/check-inline-js.js
+
+      - name: Verify README-referenced local files exist
+        run: |
+          missing=0
+          for f in $(grep -oP '\]\(\Kdocs/[^)]+' README.md); do
+            if [ ! -f "$f" ]; then
+              echo "Missing file referenced in README: $f"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then exit 1; fi
+          echo "All README-referenced files present"
